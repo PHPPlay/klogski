@@ -75,14 +75,6 @@ void xfree (void *mem) {
 }
 
 void log_txt (char *fmt, ...) 
-/**
- * PURPOSE : Display windows error
- *
- * RETURN :  Nothing
- *
- * NOTES :   None
- *
- *F*/
 {
   char    *error=NULL;
   va_list arglist;
